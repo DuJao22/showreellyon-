@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: showreellyon
+    runtime: node
+    plan: free
+    healthCheckPath: /healthz
+    buildCommand: npm install --include=dev --legacy-peer-deps && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_ENV
+        value: production
