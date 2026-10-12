@@ -1047,18 +1047,44 @@ export default function App() {
                 key2: ttsKey,
               });
               if (ttsOut?.audioBase64) {
-                setData((prev) => ({
-                  ...prev,
-                  scenes: prev.scenes.map((scItem, idx) =>
-                    idx === sceneIdx
-                      ? {
-                          ...scItem,
-                          voiceAudioBase64: ttsOut!.audioBase64 || undefined,
-                          voiceMimeType: ttsOut!.mimeType || undefined,
-                        }
-                      : scItem
-                  ),
-                }));
+                let actualAudioDur: number | null = null;
+                try {
+                  actualAudioDur = await audioRef.current?.decodeAudioDuration(
+                    ttsOut.audioBase64,
+                    ttsOut.mimeType || 'audio/L16;rate=24000'
+                  ) ?? null;
+                } catch {
+                  // ignore
+                }
+
+                setData((prev) => {
+                  let updatedAcc = 0;
+                  const newScenes = prev.scenes.map((scItem, idx) => {
+                    let sceneDur = scItem.dur;
+                    if (idx === sceneIdx && actualAudioDur && actualAudioDur > 0) {
+                      // Garante que a cena dure no mínimo o tempo do áudio + 0.5s de respiro visual antes de trocar
+                      const minRequiredDur = Math.max(scItem.dur, Math.round((actualAudioDur + 0.5) * 10) / 10);
+                      sceneDur = minRequiredDur;
+                    }
+                    const updatedSc = {
+                      ...scItem,
+                      dur: sceneDur,
+                      start: updatedAcc,
+                      voiceAudioBase64:
+                        idx === sceneIdx ? ttsOut!.audioBase64 || undefined : scItem.voiceAudioBase64,
+                      voiceMimeType:
+                        idx === sceneIdx ? ttsOut!.mimeType || undefined : scItem.voiceMimeType,
+                    };
+                    updatedAcc += sceneDur;
+                    return updatedSc;
+                  });
+
+                  return {
+                    ...prev,
+                    duration: Math.round(updatedAcc * 10) / 10,
+                    scenes: newScenes,
+                  };
+                });
               }
             } catch {
               // Web Speech API em português atua como fallback imediato

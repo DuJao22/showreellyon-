@@ -943,22 +943,36 @@ Responda APENAS com JSON válido neste formato exato:
   }
 
   const n = rawScenes.length;
+  // Calcula o tempo necessário para fala de cada cena com folga para respiração
+  // Média de fala em português: ~2.4 palavras por segundo + 0.65s de respiro final
+  const speechDurations = rawScenes.map((s) => {
+    const fullText = s.narration || `${s.text}. ${s.sub || ''}`;
+    const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
+    const estimatedSpeechSec = Math.max(2.4, (wordCount / 2.3) + 0.7);
+    return estimatedSpeechSec;
+  });
+
   const ws = rawScenes.map((s, i) => {
-    const base = Math.max(0.5, Math.min(3.0, Number(s.weight || 1)));
+    const base = Math.max(0.8, Math.min(3.0, Number(s.weight || 1)));
     const f =
       dna.structure === 'crescendo'
-        ? 1.7 - (1.2 * i) / Math.max(1, n - 1)
+        ? 1.5 - (0.8 * i) / Math.max(1, n - 1)
         : dna.structure === 'explosao_respiro'
         ? i % 2
-          ? 0.75
-          : 1.3
+          ? 0.85
+          : 1.25
         : 1.0;
     return base * f;
   });
   const sumW = ws.reduce((a, b) => a + b, 0) || 1;
-  const rawDurs = ws.map((w) => Math.max(1.6, (duration * w) / sumW));
-  const kScale = duration / (rawDurs.reduce((a, b) => a + b, 0) || 1);
-  const durs = rawDurs.map((d) => Math.round(d * kScale * 1000) / 1000);
+  // A duração de cada cena NUNCA pode ser menor que o tempo necessário para a fala ser concluída por completo
+  const durs = rawScenes.map((_s, i) => {
+    const proportionalDur = (duration * ws[i]) / sumW;
+    const requiredSpeechDur = speechDurations[i];
+    // Garante que a cena tenha pelo menos o tempo da fala + 0.4s de margem visual
+    const finalDur = Math.max(requiredSpeechDur, proportionalDur);
+    return Math.round(finalDur * 1000) / 1000;
+  });
 
   const biblioteca = lerLocal<Array<{ role: string; code: string }>>('biblioteca_cenas', []);
   let acc = 0;

@@ -291,6 +291,20 @@ export const ShowreelCanvasStage: React.FC<ShowreelCanvasStageProps> = ({
         if (lastSceneRef.current >= 0 && i !== lastSceneRef.current) {
           audioRef.current.whoosh();
         }
+        if (i !== lastSceneRef.current) {
+          const curSc = compiledScenesRef.current[i];
+          if (curSc) {
+            const spokenLine =
+              curSc.narration ||
+              (curSc.sub ? `${curSc.text}. ${curSc.sub}` : curSc.text);
+            void audioRef.current.speakScene({
+              text: spokenLine,
+              voiceAudioBase64: curSc.voiceAudioBase64,
+              voiceMimeType: curSc.voiceMimeType,
+              sceneDuration: curSc.dur,
+            });
+          }
+        }
       }
       lastSceneRef.current = i;
 

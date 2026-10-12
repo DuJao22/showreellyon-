@@ -151,6 +151,14 @@ export class ShowreelAudioSynth {
     }
   }
 
+  public async decodeAudioDuration(
+    base64Data: string,
+    mimeType = 'audio/wav'
+  ): Promise<number | null> {
+    const buf = await this.decodeBase64Audio(base64Data, mimeType);
+    return buf ? buf.duration : null;
+  }
+
   public async speakScene(options: {
     text: string;
     sceneDuration: number;
@@ -171,9 +179,12 @@ export class ShowreelAudioSynth {
       if (buf && this.ac && this.voiceGain) {
         const src = this.ac.createBufferSource();
         src.buffer = buf;
-        // Ajusta levemente a velocidade caso o áudio seja maior que a duração da cena
-        if (buf.duration > sceneDuration * 0.94 && sceneDuration > 1.2) {
-          src.playbackRate.value = Math.min(1.35, buf.duration / (sceneDuration * 0.9));
+        // Reproduz na velocidade natural de fala (ou leve aceleração de no máx 1.12x se necessário),
+        // preservando a dicção humana sem corte seco
+        if (buf.duration > sceneDuration && sceneDuration > 1.2) {
+          src.playbackRate.value = Math.min(1.12, Math.max(1.0, buf.duration / sceneDuration));
+        } else {
+          src.playbackRate.value = 1.0;
         }
         src.connect(this.voiceGain);
         this.activeVoiceSource = src;
@@ -189,10 +200,11 @@ export class ShowreelAudioSynth {
         utter.lang = 'pt-BR';
         const wordsCount = cleanText.split(/\s+/).length;
         const estimatedSec = wordsCount / 2.6;
+        // Garante cadência natural e nunca acelera excessivamente a fala
         utter.rate =
-          estimatedSec > sceneDuration * 0.85
-            ? Math.min(1.45, Math.max(1.05, estimatedSec / (sceneDuration * 0.82)))
-            : 1.08;
+          estimatedSec > sceneDuration
+            ? Math.min(1.2, Math.max(1.0, estimatedSec / sceneDuration))
+            : 1.05;
         utter.pitch = 1.0;
         utter.volume = 1.0;
 
