@@ -451,6 +451,7 @@ export default function App() {
         camera_motion: s.camera_motion,
         visual_bridge: s.visual_bridge,
         narration: s.narration || `${s.text}. ${s.sub || ''}`,
+        idea: s.idea,
       };
       MotionLib.bg(c, W, H, P, i);
       try {
@@ -495,8 +496,17 @@ export default function App() {
       const H = data.H;
       const gt = MotionLib.clamp(gtInput, 0, DUR - 1e-3);
 
+      let maxAllowedScene = sc.length - 1;
+      if (
+        playingRef.current &&
+        lastSceneRef.current >= 0 &&
+        audioRef.current?.isVoiceSpeakingForScene(lastSceneRef.current)
+      ) {
+        maxAllowedScene = lastSceneRef.current;
+      }
+
       let i = 0;
-      while (i < sc.length - 1 && gt >= sc[i + 1].start) i++;
+      while (i < maxAllowedScene && gt >= sc[i + 1].start) i++;
       // Quando pausado em 0.0s, renderiza o quadro de destaque (poster frame em 0.85s da Cena 1)
       // para que o canvas nunca apareça preto ou vazio antes de dar Play!
       const rawTs = gt - sc[i].start;
@@ -536,14 +546,36 @@ export default function App() {
 
     const tick = (now: number) => {
       const DUR = data.duration;
+      const scenes = compiledScenesRef.current;
       if (playingRef.current) {
-        gtRef.current = (now - t0Ref.current) / 1000;
+        let proposedGt = (now - t0Ref.current) / 1000;
+        const curIdx = lastSceneRef.current;
+        if (curIdx >= 0 && curIdx < scenes.length) {
+          const curSc = scenes[curIdx];
+          const nextStart = scenes[curIdx + 1]?.start ?? (curSc.start + curSc.dur);
+          // Se o roteiro narrado da cena atual ainda estiver sendo falado,
+          // segura a transição até a locução ser 100% finalizada sem corte seco
+          if (audioRef.current?.isVoiceSpeakingForScene(curIdx)) {
+            const holdPoint = Math.min(nextStart, curSc.start + curSc.dur) - 0.08;
+            if (proposedGt >= holdPoint) {
+              proposedGt = holdPoint;
+              t0Ref.current = now - proposedGt * 1000;
+            }
+          }
+        }
+        gtRef.current = proposedGt;
+
         if (gtRef.current >= DUR) {
-          gtRef.current = DUR - 1e-3;
-          playingRef.current = false;
-          setPlaying(false);
-          if (recordingRef.current) {
-            setTimeout(stopRec, 500);
+          if (curIdx >= 0 && audioRef.current?.isVoiceSpeakingForScene(curIdx)) {
+            gtRef.current = DUR - 0.08;
+            t0Ref.current = now - gtRef.current * 1000;
+          } else {
+            gtRef.current = DUR - 1e-3;
+            playingRef.current = false;
+            setPlaying(false);
+            if (recordingRef.current) {
+              setTimeout(stopRec, 500);
+            }
           }
         }
       }
@@ -571,6 +603,7 @@ export default function App() {
               voiceAudioBase64: curSc.voiceAudioBase64,
               voiceMimeType: curSc.voiceMimeType,
               sceneDuration: curSc.dur,
+              sceneIdx: i,
             });
           }
         }
@@ -1062,8 +1095,8 @@ export default function App() {
                   const newScenes = prev.scenes.map((scItem, idx) => {
                     let sceneDur = scItem.dur;
                     if (idx === sceneIdx && actualAudioDur && actualAudioDur > 0) {
-                      // Garante que a cena dure no mínimo o tempo do áudio + 0.5s de respiro visual antes de trocar
-                      const minRequiredDur = Math.max(scItem.dur, Math.round((actualAudioDur + 0.5) * 10) / 10);
+                      // Garante que a cena dure no mínimo o tempo do áudio + 0.8s de respiro visual antes de trocar
+                      const minRequiredDur = Math.max(scItem.dur, Math.round((actualAudioDur + 0.8) * 10) / 10);
                       sceneDur = minRequiredDur;
                     }
                     const updatedSc = {

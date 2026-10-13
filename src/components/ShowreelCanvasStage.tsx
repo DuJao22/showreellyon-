@@ -186,6 +186,8 @@ export const ShowreelCanvasStage: React.FC<ShowreelCanvasStageProps> = ({
         pulse: pulseAt(gt, data.dna.bpm, data.dna.energy),
         gt,
         i: idx,
+        narration: s.narration || `${s.text}. ${s.sub || ''}`,
+        idea: s.idea,
       };
       MotionLib.bg(c, W, H, P, idx);
       try {
@@ -224,8 +226,17 @@ export const ShowreelCanvasStage: React.FC<ShowreelCanvasStageProps> = ({
       const H = data.H;
       const gt = MotionLib.clamp(gtInput, 0, DUR - 1e-3);
 
+      let maxAllowedScene = scenes.length - 1;
+      if (
+        playingRef.current &&
+        lastSceneRef.current >= 0 &&
+        audioRef.current?.isVoiceSpeakingForScene(lastSceneRef.current)
+      ) {
+        maxAllowedScene = lastSceneRef.current;
+      }
+
       let i = 0;
-      while (i < scenes.length - 1 && gt >= scenes[i + 1].start) {
+      while (i < maxAllowedScene && gt >= scenes[i + 1].start) {
         i++;
       }
       const ts = gt - scenes[i].start;
@@ -262,10 +273,30 @@ export const ShowreelCanvasStage: React.FC<ShowreelCanvasStageProps> = ({
 
     const tick = (now: number) => {
       const DUR = data.duration;
+      const scenes = compiledScenesRef.current;
       if (playingRef.current) {
-        gtRef.current = (now - t0Ref.current) / 1000;
+        let proposedGt = (now - t0Ref.current) / 1000;
+        const curIdx = lastSceneRef.current;
+        if (curIdx >= 0 && curIdx < scenes.length) {
+          const curSc = scenes[curIdx];
+          const nextStart = scenes[curIdx + 1]?.start ?? (curSc.start + curSc.dur);
+          // Se a voz da cena atual ainda estiver falando o roteiro,
+          // segura a cena até o roteiro ser 100% finalizado sem corte seco
+          if (audioRef.current?.isVoiceSpeakingForScene(curIdx)) {
+            const holdPoint = Math.min(nextStart, curSc.start + curSc.dur) - 0.08;
+            if (proposedGt >= holdPoint) {
+              proposedGt = holdPoint;
+              t0Ref.current = now - proposedGt * 1000;
+            }
+          }
+        }
+        gtRef.current = proposedGt;
+
         if (gtRef.current >= DUR) {
-          if (recordingRef.current) {
+          if (curIdx >= 0 && audioRef.current?.isVoiceSpeakingForScene(curIdx)) {
+            gtRef.current = DUR - 0.08;
+            t0Ref.current = now - gtRef.current * 1000;
+          } else if (recordingRef.current) {
             gtRef.current = DUR - 1e-3;
             playingRef.current = false;
             setPlaying(false);
@@ -275,6 +306,7 @@ export const ShowreelCanvasStage: React.FC<ShowreelCanvasStageProps> = ({
             gtRef.current = 0;
             t0Ref.current = now;
             lastHalfRef.current = -1;
+            lastSceneRef.current = -1;
           }
         }
       }
@@ -302,6 +334,7 @@ export const ShowreelCanvasStage: React.FC<ShowreelCanvasStageProps> = ({
               voiceAudioBase64: curSc.voiceAudioBase64,
               voiceMimeType: curSc.voiceMimeType,
               sceneDuration: curSc.dur,
+              sceneIdx: i,
             });
           }
         }

@@ -7,6 +7,15 @@ export class ShowreelAudioSynth {
   private nbuf: AudioBuffer | null = null;
   private muted = false;
   private voiceEnabled = true;
+  private isVoiceSpeakingFlag = false;
+  private currentVoiceSceneIdx = -1;
+  private voiceEndTime = 0;
+  private voiceMinEndTime = 0;
+  private voiceGraceEndTime = 0;
+  private isAudioBufferPlaying = false;
+  private isUtterancePlaying = false;
+  private isLoadingAudio = false;
+  private activeUtterance: SpeechSynthesisUtterance | null = null;
   private activeVoiceSource: AudioBufferSourceNode | null = null;
   private decodedCache = new Map<string, AudioBuffer>();
 
@@ -77,7 +86,62 @@ export class ShowreelAudioSynth {
     return this.voiceEnabled;
   }
 
+  public isVoiceSpeaking(): boolean {
+    if (!this.voiceEnabled || this.muted) return false;
+    if (!this.isVoiceSpeakingFlag) return false;
+    if (this.isLoadingAudio) return true;
+    if (this.isAudioBufferPlaying && this.activeVoiceSource !== null) return true;
+    if (
+      this.isUtterancePlaying &&
+      typeof window !== 'undefined' &&
+      'speechSynthesis' in window &&
+      window.speechSynthesis.speaking
+    ) {
+      return true;
+    }
+    const now = performance.now();
+    return now < this.voiceGraceEndTime || now < this.voiceEndTime;
+  }
+
+  public isVoiceSpeakingForScene(idx: number): boolean {
+    if (!this.voiceEnabled || this.muted) return false;
+    if (!this.isVoiceSpeakingFlag) return false;
+    if (this.currentVoiceSceneIdx !== idx) return false;
+
+    // 1. Se ainda está decodificando ou carregando áudio da cena
+    if (this.isLoadingAudio) return true;
+
+    // 2. Se o buffer neural Web Audio (Gemini TTS) ainda estiver ativamente tocando
+    if (this.isAudioBufferPlaying && this.activeVoiceSource !== null) return true;
+
+    // 3. Se o sintetizador do navegador ainda estiver pronunciando palavras
+    if (
+      this.isUtterancePlaying &&
+      typeof window !== 'undefined' &&
+      'speechSynthesis' in window &&
+      window.speechSynthesis.speaking
+    ) {
+      return true;
+    }
+
+    const now = performance.now();
+    // 4. Margem de respiro de 450ms pós-fala (garante que a última palavra ressoe antes do corte)
+    if (now < this.voiceGraceEndTime) return true;
+    if (now < this.voiceEndTime) return true;
+    if (now < this.voiceMinEndTime) return true;
+
+    return false;
+  }
+
   public stopVoice() {
+    this.isVoiceSpeakingFlag = false;
+    this.isLoadingAudio = false;
+    this.isAudioBufferPlaying = false;
+    this.isUtterancePlaying = false;
+    this.currentVoiceSceneIdx = -1;
+    this.voiceEndTime = 0;
+    this.voiceMinEndTime = 0;
+    this.voiceGraceEndTime = 0;
     if (this.activeVoiceSource) {
       try {
         this.activeVoiceSource.stop();
@@ -93,6 +157,7 @@ export class ShowreelAudioSynth {
       } catch {
         // ignore
       }
+      this.activeUtterance = null;
     }
   }
 
@@ -164,49 +229,108 @@ export class ShowreelAudioSynth {
     sceneDuration: number;
     voiceAudioBase64?: string;
     voiceMimeType?: string;
+    sceneIdx?: number;
+    onEnd?: () => void;
   }) {
     if (this.muted || !this.voiceEnabled) return;
-    const { text, sceneDuration, voiceAudioBase64, voiceMimeType } = options;
+    const { text, sceneDuration, voiceAudioBase64, voiceMimeType, sceneIdx = -1, onEnd } = options;
     const cleanText = String(text || '').trim();
     if (!cleanText) return;
 
     this.stopVoice();
     this.init();
 
-    // 1. Se houver áudio neural da Gemini TTS para a cena, toca pelo AudioContext (entra na gravação de vídeo!)
+    this.currentVoiceSceneIdx = sceneIdx;
+    this.isVoiceSpeakingFlag = true;
+    this.isLoadingAudio = true;
+
+    const wordsCount = cleanText.split(/\s+/).filter(Boolean).length;
+    // Cadência humana de locução em português: ~1.95 palavras/segundo + 0.75s de respiração
+    const estimatedSec = Math.max(2.8, (wordsCount / 1.95) + 0.75);
+    const now = performance.now();
+    this.voiceMinEndTime = now + (estimatedSec * 0.85) * 1000;
+    this.voiceEndTime = now + estimatedSec * 1000;
+    this.voiceGraceEndTime = this.voiceEndTime + 450;
+
+    // 1. Se houver áudio neural da Gemini TTS para a cena, toca pelo AudioContext
     if (voiceAudioBase64 && this.ac && this.voiceGain) {
       const buf = await this.decodeBase64Audio(voiceAudioBase64, voiceMimeType);
+      if (this.currentVoiceSceneIdx !== sceneIdx || !this.isVoiceSpeakingFlag) {
+        this.isLoadingAudio = false;
+        return;
+      }
+
       if (buf && this.ac && this.voiceGain) {
+        this.isLoadingAudio = false;
         const src = this.ac.createBufferSource();
         src.buffer = buf;
-        // Reproduz na velocidade natural de fala (ou leve aceleração de no máx 1.12x se necessário),
-        // preservando a dicção humana sem corte seco
-        if (buf.duration > sceneDuration && sceneDuration > 1.2) {
-          src.playbackRate.value = Math.min(1.12, Math.max(1.0, buf.duration / sceneDuration));
-        } else {
-          src.playbackRate.value = 1.0;
-        }
+        // Reproduz na velocidade natural de fala 1.0 (ou leve ajuste se necessário)
+        const rate = buf.duration > sceneDuration && sceneDuration > 1.2
+          ? Math.min(1.06, Math.max(1.0, buf.duration / sceneDuration))
+          : 1.0;
+        src.playbackRate.value = rate;
         src.connect(this.voiceGain);
         this.activeVoiceSource = src;
+        this.isAudioBufferPlaying = true;
+
+        const durSec = buf.duration / rate;
+        const playStart = performance.now();
+        this.voiceEndTime = playStart + durSec * 1000;
+        this.voiceMinEndTime = playStart + (durSec * 0.9) * 1000;
+        this.voiceGraceEndTime = this.voiceEndTime + 450;
+
+        src.onended = () => {
+          if (this.activeVoiceSource === src) {
+            this.activeVoiceSource = null;
+            this.isAudioBufferPlaying = false;
+            this.voiceGraceEndTime = performance.now() + 450;
+            setTimeout(() => {
+              if (this.currentVoiceSceneIdx === sceneIdx && !this.isAudioBufferPlaying) {
+                this.isVoiceSpeakingFlag = false;
+                onEnd?.();
+              }
+            }, 450);
+          }
+        };
+
         src.start(0);
         return;
       }
     }
 
-    // 2. Fallback imediato de zero latência via Web Speech API em Português
+    this.isLoadingAudio = false;
+
+    // 2. Fallback humanizado de fala imediata via Web Speech API em Português
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
+        window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(cleanText);
         utter.lang = 'pt-BR';
-        const wordsCount = cleanText.split(/\s+/).length;
-        const estimatedSec = wordsCount / 2.6;
-        // Garante cadência natural e nunca acelera excessivamente a fala
-        utter.rate =
-          estimatedSec > sceneDuration
-            ? Math.min(1.2, Math.max(1.0, estimatedSec / sceneDuration))
-            : 1.05;
+        utter.rate = 0.98; // Cadência humana articulada, pausada e sem pressa
         utter.pitch = 1.0;
         utter.volume = 1.0;
+
+        this.isUtterancePlaying = true;
+        this.voiceEndTime = performance.now() + estimatedSec * 1000;
+        this.voiceGraceEndTime = this.voiceEndTime + 450;
+
+        utter.onend = () => {
+          this.isUtterancePlaying = false;
+          this.voiceGraceEndTime = performance.now() + 450;
+          setTimeout(() => {
+            if (this.currentVoiceSceneIdx === sceneIdx && !this.isUtterancePlaying) {
+              this.isVoiceSpeakingFlag = false;
+              this.activeUtterance = null;
+              onEnd?.();
+            }
+          }, 450);
+        };
+
+        utter.onerror = () => {
+          this.isUtterancePlaying = false;
+          this.isVoiceSpeakingFlag = false;
+          this.activeUtterance = null;
+        };
 
         const voices = window.speechSynthesis.getVoices();
         const ptVoice =
@@ -214,17 +338,21 @@ export class ShowreelAudioSynth {
             (v) =>
               v.lang.toLowerCase().includes('pt-br') &&
               (v.name.toLowerCase().includes('natural') ||
+                v.name.toLowerCase().includes('neural') ||
+                v.name.toLowerCase().includes('francisca') ||
+                v.name.toLowerCase().includes('antonio') ||
                 v.name.toLowerCase().includes('google') ||
                 v.name.toLowerCase().includes('luciana') ||
-                v.name.toLowerCase().includes('francisca') ||
-                v.name.toLowerCase().includes('antonio'))
+                v.name.toLowerCase().includes('felipe'))
           ) || voices.find((v) => v.lang.toLowerCase().startsWith('pt'));
         if (ptVoice) {
           utter.voice = ptVoice;
         }
+        this.activeUtterance = utter;
         window.speechSynthesis.speak(utter);
       } catch {
-        // ignore speech synthesis errors
+        this.isVoiceSpeakingFlag = false;
+        this.isUtterancePlaying = false;
       }
     }
   }

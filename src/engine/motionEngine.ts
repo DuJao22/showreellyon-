@@ -16,6 +16,7 @@ export interface ScenePaintContext {
   camera_motion?: string;
   visual_bridge?: string;
   narration?: string;
+  idea?: string;
 }
 
 export type SceneDrawFn = (
@@ -649,80 +650,895 @@ export const MotionLib = {
         fs * (1 + P.pulse * 0.05),
         {
           align: o.align || 'center',
-          rot: o.rot,
-          color: i === L.length - 1 && L.length > 1 ? P.pal.acc : P.pal.fg,
-          alpha: baseAlpha * MotionLib.clamp(st * 1.4),
           glow: P.pal.acc,
         }
       );
     });
   },
-  sub: (ctx: CanvasRenderingContext2D, W: number, H: number, P: ScenePaintContext, ts: number) => {
-    const s = String(P.sub || '').trim();
-    if (!s) return;
-    const a = MotionLib.ease.outCubic(MotionLib.p(ts, 0.12, 0.32));
-    if (a <= 0) return;
-
-    const words = s.toUpperCase().split(/\s+/).filter(Boolean);
-    if (!words.length) return;
-
-    // Quebra inteligente em linhas de até 28 caracteres (até 6 linhas) para que 100% do que é falado caiba na tela com clareza
-    const lines = MotionLib.lines(words.join(' '), 28, 6);
-    const longest = lines.reduce((acc, l) => (l.length > acc.length ? l : acc), '');
-    const sz = MotionLib.fit(ctx, longest, W * 0.82, Math.min(W * 0.042, 30), 700);
-    const lh = sz * 1.32;
-    const totalH = lines.length * lh + sz * 0.9;
-    const boxW = W * 0.88;
-    const boxX = (W - boxW) / 2;
-    const baseY = H * 0.84 - totalH / 2 + (1 - a) * 18;
+  renderCodeSystem: (
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    P: ScenePaintContext,
+    ts: number
+  ) => {
+    const e = MotionLib.ease.outExpo(MotionLib.p(ts, 0, 0.75));
+    const cx = W / 2;
+    const cy = H * 0.44;
 
     ctx.save();
-    ctx.globalAlpha = a;
 
-    // Painel translúcido editorial para leitura cristalina da narração
-    ctx.fillStyle = MotionLib.col(P.pal.bg1, 0.78);
-    MotionLib.rrect(ctx, boxX, baseY, boxW, totalH, 14);
+    // 1. Fase de geração de código acelerado (0.0s - 1.8s)
+    const codeProg = MotionLib.clamp(ts / 1.5, 0, 1);
+    const winW = W * 0.88 * e;
+    const winH = H * (ts > 1.8 ? 0.22 : 0.36) * e;
+    const wx = cx - winW / 2;
+    const wy = cy - (ts > 1.8 ? H * 0.22 : winH / 2);
+
+    // Janela do editor de código
+    ctx.fillStyle = MotionLib.col(P.pal.bg2, 0.94);
+    MotionLib.rrect(ctx, wx, wy, winW, winH, 16);
     ctx.fill();
-    ctx.strokeStyle = MotionLib.col(P.pal.acc, 0.45);
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = MotionLib.col(P.pal.acc2, 0.7);
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Barra de progresso da voz narrada na base da legenda
-    const speakProg = MotionLib.clamp((ts - 0.1) / Math.max(0.4, (P.dur || 3) * 0.78));
-    ctx.fillStyle = P.pal.acc;
-    MotionLib.rrect(ctx, boxX + 8, baseY + totalH - 4, (boxW - 16) * speakProg, 3, 2);
+    // Barra de título do editor com botões macOS e status de compilação
+    ctx.fillStyle = MotionLib.col(P.pal.bg1, 0.96);
+    MotionLib.rrect(ctx, wx, wy, winW, 36, 16);
     ctx.fill();
+    const btnColors = ['#ff5f56', '#ffbd2e', '#27c93f'];
+    for (let d = 0; d < 3; d++) {
+      ctx.fillStyle = btnColors[d];
+      ctx.beginPath();
+      ctx.arc(wx + 20 + d * 18, wy + 18, 5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    MotionLib.text(
+      ctx,
+      'gerando-sistema.ts · compilando código...',
+      wx + winW / 2,
+      wy + 18,
+      13,
+      { color: P.pal.dim, align: 'center' }
+    );
 
-    // Renderiza linha por linha destacando as palavras já faladas pela voz
-    const totalWords = words.length;
-    const activeWordIdx = Math.floor(speakProg * totalWords);
-    let wordCounter = 0;
+    // Linhas dinâmicas de código sendo geradas velozmente
+    const codeLines = [
+      { num: '01', text: "import { Sistema, AgenteIA, BancoDados } from '@cloud/saas';", col: P.pal.acc2 },
+      { num: '02', text: "export const app = new Sistema({ modo: 'autônomo', autoDeploy: true });", col: P.pal.fg },
+      { num: '03', text: 'await app.gerarPipelineCompleto({ auth: true, pagamentos: true });', col: P.pal.acc },
+      { num: '04', text: 'const instancia = await app.iniciarSistemaProducao();', col: P.pal.acc2 },
+      { num: '05', text: '// ✓ SISTEMA CRIADO E PRONTO COM SUCESSO', col: P.pal.acc },
+    ];
 
-    lines.forEach((line, idx) => {
-      const lineWords = line.split(/\s+/).filter(Boolean);
-      const y = baseY + sz * 0.78 + idx * lh;
+    const maxLinesToShow = ts > 1.8 ? 3 : 5;
+    const typingProgress = MotionLib.clamp(ts * 2.8, 0, codeLines.length);
 
-      ctx.font = `700 ${Math.round(sz)}px system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif`;
-      const spaceW = ctx.measureText(' ').width * 1.08;
-      const wordWidths = lineWords.map((w) => ctx.measureText(w).width);
-      const lineW =
-        wordWidths.reduce((sum, w) => sum + w, 0) + Math.max(0, lineWords.length - 1) * spaceW;
+    for (let li = 0; li < Math.min(codeLines.length, maxLinesToShow); li++) {
+      const line = codeLines[li];
+      if (li > typingProgress) continue;
+      const charRatio = MotionLib.clamp(typingProgress - li, 0, 1);
+      const charsToShow = Math.floor(line.text.length * charRatio);
+      const visibleText = line.text.slice(0, charsToShow);
+      const ly = wy + 58 + li * 26;
 
-      let curX = W / 2 - lineW / 2;
-      lineWords.forEach((w, wi) => {
-        const wIdx = wordCounter++;
-        const isSpoken = wIdx <= activeWordIdx;
-        const isCurrent = wIdx === activeWordIdx;
-        const ww = wordWidths[wi];
-        MotionLib.text(ctx, w, curX + ww / 2, y, sz * (isCurrent ? 1.06 : 1), {
-          color: isCurrent ? P.pal.acc2 : isSpoken ? P.pal.fg : P.pal.dim,
-          alpha: isSpoken ? 1 : 0.62,
+      MotionLib.text(ctx, line.num, wx + 18, ly, 12, {
+        color: MotionLib.col(P.pal.dim, 0.45),
+        align: 'left',
+      });
+
+      MotionLib.text(ctx, visibleText, wx + 48, ly, 13, {
+        color: line.col,
+        align: 'left',
+        glow: li === 2 || li === 4 ? P.pal.acc : undefined,
+      });
+
+      if (Math.floor(typingProgress) === li && Math.sin(ts * 14) > 0) {
+        ctx.font = '13px monospace';
+        const tw = ctx.measureText(visibleText).width;
+        ctx.fillStyle = P.pal.acc;
+        ctx.fillRect(wx + 50 + tw, ly - 9, 7, 14);
+      }
+    }
+
+    // 2. Transição para o EXEMPLO DO SISTEMA CRIADO EM EXECUÇÃO (a partir de ts > 1.4s)
+    const sysEnter = MotionLib.ease.outBack(MotionLib.p(ts, 1.4, 0.75));
+    if (sysEnter > 0) {
+      const sysW = W * 0.88 * sysEnter;
+      const sysH = H * 0.28 * sysEnter;
+      const sysX = cx - sysW / 2;
+      const sysY = cy + H * 0.05 + (1 - sysEnter) * 35;
+
+      // Card do Sistema Criado (Live SaaS Preview)
+      ctx.fillStyle = MotionLib.col(P.pal.bg1, 0.94);
+      MotionLib.rrect(ctx, sysX, sysY, sysW, sysH, 18);
+      ctx.fill();
+      ctx.strokeStyle = P.pal.acc;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      // Top bar do sistema
+      ctx.fillStyle = MotionLib.col(P.pal.acc, 0.16);
+      MotionLib.rrect(ctx, sysX + 12, sysY + 12, sysW - 24, 34, 10);
+      ctx.fill();
+      ctx.strokeStyle = MotionLib.col(P.pal.acc, 0.5);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      MotionLib.text(
+        ctx,
+        '⚡ SISTEMA CRIADO E ATIVO · EXEMPLO DE MINI SAAS',
+        sysX + sysW / 2,
+        sysY + 29,
+        13,
+        { color: P.pal.acc, align: 'center', weight: 800, glow: P.pal.acc }
+      );
+
+      // Mini módulos internos do sistema criado
+      const modW = (sysW - 48) / 3;
+      const modH = sysH - 70;
+      const modY = sysY + 54;
+
+      const mods = [
+        { label: 'USUÁRIOS', val: '+2.450', col: P.pal.acc2 },
+        { label: 'STATUS', val: '100% ONLINE', col: P.pal.acc },
+        { label: 'FATURAMENTO', val: 'R$ 18.900', col: P.pal.acc },
+      ];
+
+      mods.forEach((md, mi) => {
+        const mx = sysX + 16 + mi * (modW + 8);
+        ctx.fillStyle = MotionLib.col(P.pal.bg2, 0.88);
+        MotionLib.rrect(ctx, mx, modY, modW, modH, 10);
+        ctx.fill();
+        ctx.strokeStyle = MotionLib.col(md.col, 0.4);
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        MotionLib.text(ctx, md.label, mx + modW / 2, modY + 18, 10, {
+          color: P.pal.dim,
+          align: 'center',
           weight: 700,
-          glow: isCurrent ? P.pal.acc : undefined,
         });
-        curX += ww + spaceW;
+        MotionLib.text(ctx, md.val, mx + modW / 2, modY + 40, 13, {
+          color: md.col,
+          align: 'center',
+          weight: 800,
+          glow: mi > 0 ? md.col : undefined,
+        });
+      });
+    }
+
+    ctx.restore();
+  },
+  renderGrowthFinance: (
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    P: ScenePaintContext,
+    ts: number
+  ) => {
+    const e = MotionLib.ease.outExpo(MotionLib.p(ts, 0, 0.8));
+    const cx = W / 2;
+    const cy = H * 0.44;
+    const cardW = W * 0.88 * e;
+    const cardH = H * 0.36 * e;
+    const x0 = cx - cardW / 2;
+    const y0 = cy - cardH / 2;
+
+    ctx.save();
+    ctx.fillStyle = MotionLib.col(P.pal.bg2, 0.9);
+    MotionLib.rrect(ctx, x0, y0, cardW, cardH, 20);
+    ctx.fill();
+    ctx.strokeStyle = MotionLib.col(P.pal.acc, 0.7);
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+
+    MotionLib.text(ctx, 'FATURAMENTO & ESCALA EM TEMPO REAL', x0 + 26, y0 + 36, 14, {
+      color: P.pal.dim,
+      align: 'left',
+    });
+
+    const valProgress = MotionLib.clamp(ts * 0.9, 0, 1);
+    const formattedVal = Math.round(valProgress * 148500).toLocaleString('pt-BR');
+    MotionLib.text(ctx, `R$ ${formattedVal}`, x0 + 26, y0 + 82, 38 * (1 + P.pulse * 0.04), {
+      color: P.pal.fg,
+      align: 'left',
+      glow: P.pal.acc,
+    });
+
+    const badgeW = 140;
+    const badgeH = 34;
+    ctx.fillStyle = MotionLib.col(P.pal.acc, 0.22);
+    MotionLib.rrect(ctx, x0 + cardW - badgeW - 24, y0 + 56, badgeW, badgeH, 17);
+    ctx.fill();
+    ctx.strokeStyle = P.pal.acc;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    MotionLib.text(ctx, '▲ +480% MÊS', x0 + cardW - badgeW / 2 - 24, y0 + 73, 14, {
+      color: P.pal.acc,
+      align: 'center',
+    });
+
+    const chartX = x0 + 28;
+    const chartY = y0 + cardH - 30;
+    const chartW = cardW - 56;
+    const chartH = cardH * 0.44;
+
+    const pts: { x: number; y: number }[] = [];
+    const numPts = 20;
+    for (let k = 0; k <= numPts; k++) {
+      const prog = k / numPts;
+      const px = chartX + prog * chartW;
+      const curve = Math.pow(prog, 2.2);
+      const drawProgress = MotionLib.clamp(ts * 1.4 - prog * 0.6, 0, 1);
+      const py = chartY - curve * chartH * drawProgress - Math.sin(prog * 6 + ts * 3) * 6 * drawProgress;
+      pts.push({ x: px, y: py });
+    }
+
+    if (pts.length > 1) {
+      const grad = ctx.createLinearGradient(0, chartY - chartH, 0, chartY);
+      grad.addColorStop(0, MotionLib.col(P.pal.acc, 0.35));
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, chartY);
+      pts.forEach((p) => ctx.lineTo(p.x, p.y));
+      ctx.lineTo(pts[pts.length - 1].x, chartY);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = P.pal.acc;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(pts[0].x, pts[0].y);
+      pts.forEach((p) => ctx.lineTo(p.x, p.y));
+      ctx.stroke();
+
+      const lastP = pts[pts.length - 1];
+      ctx.fillStyle = P.pal.acc;
+      ctx.beginPath();
+      ctx.arc(lastP.x, lastP.y, 7 + P.pulse * 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  },
+  renderAIAgents: (
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    P: ScenePaintContext,
+    ts: number
+  ) => {
+    const e = MotionLib.ease.outExpo(MotionLib.p(ts, 0, 0.75));
+    const cx = W / 2;
+    const cy = H * 0.44;
+
+    ctx.save();
+    const g = ctx.createRadialGradient(cx, cy, 10, cx, cy, W * 0.46 * e);
+    g.addColorStop(0, MotionLib.col(P.pal.acc2, 0.4));
+    g.addColorStop(0.5, MotionLib.col(P.pal.acc, 0.15));
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, cy - H * 0.22, W, H * 0.44);
+
+    const layers = [3, 4, 4, 2];
+    const layerX = [cx - W * 0.34, cx - W * 0.12, cx + W * 0.12, cx + W * 0.34];
+    const layerH = H * 0.26;
+    const allNodes: { x: number; y: number; l: number; n: number }[][] = [];
+
+    layers.forEach((cnt, li) => {
+      const nodesInLayer: { x: number; y: number; l: number; n: number }[] = [];
+      for (let ni = 0; ni < cnt; ni++) {
+        const ny = cy - layerH / 2 + (ni / Math.max(1, cnt - 1)) * layerH;
+        nodesInLayer.push({ x: layerX[li], y: ny, l: li, n: ni });
+      }
+      allNodes.push(nodesInLayer);
+    });
+
+    ctx.lineWidth = 1.8;
+    for (let li = 0; li < allNodes.length - 1; li++) {
+      const fromNodes = allNodes[li];
+      const toNodes = allNodes[li + 1];
+      fromNodes.forEach((fn, fni) => {
+        toNodes.forEach((tn, tni) => {
+          ctx.strokeStyle = MotionLib.col((fni + tni) % 2 ? P.pal.acc : P.pal.acc2, 0.25);
+          ctx.beginPath();
+          ctx.moveTo(fn.x, fn.y);
+          ctx.lineTo(tn.x, tn.y);
+          ctx.stroke();
+
+          const pulseT = (ts * 2.5 + (fni * 3 + tni) * 0.2) % 1;
+          const px = fn.x + (tn.x - fn.x) * pulseT;
+          const py = fn.y + (tn.y - fn.y) * pulseT;
+          ctx.fillStyle = P.pal.acc;
+          ctx.beginPath();
+          ctx.arc(px, py, 3, 0, Math.PI * 2);
+          ctx.fill();
+        });
+      });
+    }
+
+    allNodes.forEach((nodes, li) => {
+      nodes.forEach((n) => {
+        const isOutput = li === allNodes.length - 1;
+        const col = isOutput ? P.pal.acc : li === 0 ? P.pal.fg : P.pal.acc2;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.arc(n.x, n.y, 8 + P.pulse * 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = MotionLib.col(col, 0.5);
+        ctx.lineWidth = 3;
+        ctx.stroke();
       });
     });
+
+    const badgeW = W * 0.6;
+    const badgeH = 38;
+    ctx.fillStyle = MotionLib.col(P.pal.bg1, 0.88);
+    MotionLib.rrect(ctx, cx - badgeW / 2, cy + layerH / 2 + 18, badgeW, badgeH, 19);
+    ctx.fill();
+    ctx.strokeStyle = P.pal.acc;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    MotionLib.text(ctx, '⚡ REDE NEURAL & AGENTES AUTÔNOMOS', cx, cy + layerH / 2 + 37, 13, {
+      color: P.pal.acc,
+      align: 'center',
+    });
+    ctx.restore();
+  },
+  renderSpeedLaunch: (
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    P: ScenePaintContext,
+    ts: number
+  ) => {
+    const cx = W / 2;
+    const cy = H * 0.44;
+
+    ctx.save();
+    for (let k = 0; k < 28; k++) {
+      const a = (k / 28) * Math.PI * 2;
+      const speedProg = (ts * 3.5 + k * 0.15) % 1;
+      const r0 = W * (0.08 + speedProg * 0.15);
+      const r1 = W * (0.15 + speedProg * 0.7);
+      ctx.strokeStyle = MotionLib.col(k % 2 ? P.pal.acc : P.pal.acc2, speedProg);
+      ctx.lineWidth = 1.5 + speedProg * 4;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0);
+      ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1);
+      ctx.stroke();
+    }
+
+    const gaugeR = W * 0.28;
+    ctx.strokeStyle = MotionLib.col(P.pal.bg2, 0.8);
+    ctx.lineWidth = 16;
+    ctx.beginPath();
+    ctx.arc(cx, cy, gaugeR, -Math.PI * 0.8, Math.PI * 0.8);
+    ctx.stroke();
+
+    const gaugeVal = MotionLib.clamp(ts * 1.2, 0, 1);
+    ctx.strokeStyle = P.pal.acc;
+    ctx.lineWidth = 16;
+    ctx.beginPath();
+    ctx.arc(cx, cy, gaugeR, -Math.PI * 0.8, -Math.PI * 0.8 + gaugeVal * Math.PI * 1.6);
+    ctx.stroke();
+
+    const msCount = Math.floor((ts * 100) % 100);
+    const secCount = Math.floor(ts % 60);
+    MotionLib.text(
+      ctx,
+      `00:${String(secCount).padStart(2, '0')}:${String(msCount).padStart(2, '0')}`,
+      cx,
+      cy - 10,
+      32 * (1 + P.pulse * 0.05),
+      { color: P.pal.fg, align: 'center', glow: P.pal.acc }
+    );
+    MotionLib.text(ctx, 'TEMPO RECORDE · ALTA VELOCIDADE', cx, cy + 28, 14, {
+      color: P.pal.acc,
+      align: 'center',
+    });
+    ctx.restore();
+  },
+  renderSecurityTrust: (
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    P: ScenePaintContext,
+    ts: number
+  ) => {
+    const cx = W / 2;
+    const cy = H * 0.44;
+    const e = MotionLib.ease.outBack(MotionLib.p(ts, 0, 0.7));
+
+    ctx.save();
+    const shieldR = W * 0.26 * e;
+    ctx.fillStyle = MotionLib.col(P.pal.bg2, 0.85);
+    MotionLib.poly(ctx, cx, cy, shieldR, 6, Math.PI / 6);
+    ctx.fill();
+    ctx.strokeStyle = P.pal.acc;
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    for (let r = 1; r <= 2; r++) {
+      ctx.strokeStyle = MotionLib.col(P.pal.acc2, 0.5 / r);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(
+        cx,
+        cy,
+        shieldR * (0.6 + r * 0.25),
+        ts * (r % 2 ? 1.5 : -1.5),
+        ts * (r % 2 ? 1.5 : -1.5) + Math.PI * 1.4
+      );
+      ctx.stroke();
+    }
+
+    const scanY = cy + Math.sin(ts * 4) * (shieldR * 0.6);
+    ctx.strokeStyle = P.pal.acc;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(cx - shieldR * 0.65, scanY);
+    ctx.lineTo(cx + shieldR * 0.65, scanY);
+    ctx.stroke();
+
+    MotionLib.text(ctx, '✓ 100% SEGURO & AUDITADO', cx, cy + shieldR + 24, 15, {
+      color: P.pal.acc,
+      align: 'center',
+      glow: P.pal.acc,
+    });
+    ctx.restore();
+  },
+  renderClientsConversion: (
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    P: ScenePaintContext,
+    ts: number
+  ) => {
+    const cx = W / 2;
+    const cy = H * 0.44;
+    const e = MotionLib.ease.outExpo(MotionLib.p(ts, 0, 0.75));
+
+    ctx.save();
+    const stages = [
+      { name: 'TRÁFEGO & LEADS', w: W * 0.78, y: cy - H * 0.14, col: P.pal.acc2 },
+      { name: 'CONEXÃO IA ATIVA', w: W * 0.56, y: cy - H * 0.04, col: P.pal.fg },
+      { name: 'CLIENTES CONVERTIDOS', w: W * 0.36, y: cy + H * 0.06, col: P.pal.acc },
+    ];
+
+    stages.forEach((stg, i) => {
+      const sw = stg.w * e;
+      const sh = 42;
+      ctx.fillStyle = MotionLib.col(P.pal.bg2, 0.88);
+      MotionLib.rrect(ctx, cx - sw / 2, stg.y, sw, sh, 12);
+      ctx.fill();
+      ctx.strokeStyle = MotionLib.col(stg.col, 0.7);
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      MotionLib.text(ctx, stg.name, cx, stg.y + sh / 2, 14, {
+        color: stg.col,
+        align: 'center',
+        glow: i === 2 ? P.pal.acc : undefined,
+      });
+    });
+
+    for (let k = 0; k < 12; k++) {
+      const prog = (ts * 1.6 + k * 0.25) % 1;
+      const py = cy - H * 0.16 + prog * H * 0.28;
+      const spread = (1 - prog * 0.5) * (W * 0.3);
+      const px = cx + Math.sin(k * 7 + ts * 2) * spread;
+      ctx.fillStyle = k % 2 ? P.pal.acc : P.pal.acc2;
+      ctx.beginPath();
+      ctx.arc(px, py, 4 + P.pulse * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    const notifW = W * 0.72;
+    const notifY = cy + H * 0.15;
+    ctx.fillStyle = MotionLib.col(P.pal.acc, 0.18);
+    MotionLib.rrect(ctx, cx - notifW / 2, notifY, notifW, 40, 20);
+    ctx.fill();
+    ctx.strokeStyle = P.pal.acc;
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    MotionLib.text(ctx, '🔔 +1 NOVO CLIENTE CONVERTIDO!', cx, notifY + 20, 14, {
+      color: P.pal.acc,
+      align: 'center',
+    });
+    ctx.restore();
+  },
+  renderMobileApp: (
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    P: ScenePaintContext,
+    ts: number
+  ) => {
+    const cx = W / 2;
+    const cy = H * 0.44;
+    const e = MotionLib.ease.outExpo(MotionLib.p(ts, 0, 0.8));
+    const mw = W * 0.58 * e;
+    const mh = H * 0.36 * e;
+    const mx = cx - mw / 2;
+    const my = cy - mh / 2;
+
+    ctx.save();
+    ctx.fillStyle = MotionLib.col(P.pal.bg1, 0.95);
+    MotionLib.rrect(ctx, mx, my, mw, mh, 28);
+    ctx.fill();
+    ctx.strokeStyle = MotionLib.col(P.pal.acc2, 0.7);
+    ctx.lineWidth = 3.5;
+    ctx.stroke();
+
+    ctx.fillStyle = MotionLib.col(P.pal.bg2, 0.9);
+    MotionLib.rrect(ctx, cx - 36, my + 10, 72, 14, 7);
+    ctx.fill();
+
+    for (let c = 0; c < 3; c++) {
+      const cardY = my + 38 + c * 38;
+      const cardProgress = MotionLib.clamp(ts * 1.5 - c * 0.2, 0, 1);
+      ctx.fillStyle = MotionLib.col(P.pal.bg2, 0.85);
+      MotionLib.rrect(ctx, mx + 16, cardY, (mw - 32) * cardProgress, 30, 8);
+      ctx.fill();
+      ctx.strokeStyle = MotionLib.col(c === 0 ? P.pal.acc : P.pal.acc2, 0.5);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.restore();
+  },
+  semanticMotion: (
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    P: ScenePaintContext,
+    ts: number
+  ) => {
+    const fullText = `${P.text || ''} ${P.sub || ''} ${P.narration || ''} ${P.idea || ''}`.toLowerCase();
+
+    // 1. Criar sistema, código, software, app, programar, desenvolvimento
+    if (
+      fullText.includes('sistema') ||
+      fullText.includes('código') ||
+      fullText.includes('codigo') ||
+      fullText.includes('software') ||
+      fullText.includes('program') ||
+      fullText.includes('app') ||
+      fullText.includes('aplicativo') ||
+      fullText.includes('plataforma') ||
+      fullText.includes('saas') ||
+      fullText.includes('criar') ||
+      fullText.includes('dev') ||
+      fullText.includes('computador')
+    ) {
+      MotionLib.renderCodeSystem(ctx, W, H, P, ts);
+      return;
+    }
+
+    // 2. Vendas, faturamento, dinheiro, receita, lucro, escala, gráfico
+    if (
+      fullText.includes('venda') ||
+      fullText.includes('dinheiro') ||
+      fullText.includes('lucro') ||
+      fullText.includes('fatur') ||
+      fullText.includes('escala') ||
+      fullText.includes('crescimento') ||
+      fullText.includes('receita') ||
+      fullText.includes('mrr') ||
+      fullText.includes('gráfico') ||
+      fullText.includes('grafico') ||
+      fullText.includes('lucrativ')
+    ) {
+      MotionLib.renderGrowthFinance(ctx, W, H, P, ts);
+      return;
+    }
+
+    // 3. IA, inteligência artificial, neural, agente, automação, modelo, prompt
+    if (
+      fullText.includes('ia') ||
+      fullText.includes('inteligência') ||
+      fullText.includes('inteligencia') ||
+      fullText.includes('artificial') ||
+      fullText.includes('neural') ||
+      fullText.includes('agente') ||
+      fullText.includes('robô') ||
+      fullText.includes('robo') ||
+      fullText.includes('automaç') ||
+      fullText.includes('automac') ||
+      fullText.includes('automátic') ||
+      fullText.includes('automatic') ||
+      fullText.includes('prompt')
+    ) {
+      MotionLib.renderAIAgents(ctx, W, H, P, ts);
+      return;
+    }
+
+    // 4. Velocidade, rápido, tempo recorde, lançar, deploy, agilidade
+    if (
+      fullText.includes('rápido') ||
+      fullText.includes('rapido') ||
+      fullText.includes('tempo') ||
+      fullText.includes('recorde') ||
+      fullText.includes('velocidade') ||
+      fullText.includes('lançar') ||
+      fullText.includes('lancar') ||
+      fullText.includes('deploy') ||
+      fullText.includes('acelerar') ||
+      fullText.includes('foguete') ||
+      fullText.includes('minuto') ||
+      fullText.includes('segundo')
+    ) {
+      MotionLib.renderSpeedLaunch(ctx, W, H, P, ts);
+      return;
+    }
+
+    // 5. Clientes, leads, conversão, público, tráfego
+    if (
+      fullText.includes('cliente') ||
+      fullText.includes('lead') ||
+      fullText.includes('conversão') ||
+      fullText.includes('conversao') ||
+      fullText.includes('tráfego') ||
+      fullText.includes('trafego') ||
+      fullText.includes('público') ||
+      fullText.includes('publico')
+    ) {
+      MotionLib.renderClientsConversion(ctx, W, H, P, ts);
+      return;
+    }
+
+    // 6. Segurança, confiança, garantia, proteção
+    if (
+      fullText.includes('segur') ||
+      fullText.includes('confian') ||
+      fullText.includes('garantia') ||
+      fullText.includes('proteç') ||
+      fullText.includes('protec') ||
+      fullText.includes('blindad')
+    ) {
+      MotionLib.renderSecurityTrust(ctx, W, H, P, ts);
+      return;
+    }
+
+    // Fallback contextual por papel narrativo da cena
+    if (P.role === 'hook') {
+      MotionLib.renderCodeSystem(ctx, W, H, P, ts);
+    } else if (P.role === 'climax') {
+      MotionLib.renderGrowthFinance(ctx, W, H, P, ts);
+    } else if (P.role === 'closing') {
+      MotionLib.renderClientsConversion(ctx, W, H, P, ts);
+    } else {
+      MotionLib.renderAIAgents(ctx, W, H, P, ts);
+    }
+  },
+  sub: (ctx: CanvasRenderingContext2D, W: number, H: number, P: ScenePaintContext, ts: number) => {
+    MotionLib.narrativePresentation(ctx, W, H, P, ts);
+  },
+  narrativePresentation: (
+    ctx: CanvasRenderingContext2D,
+    W: number,
+    H: number,
+    P: ScenePaintContext,
+    ts: number
+  ) => {
+    const rawSub = String(P.sub || '').trim();
+    const rawText = String(P.text || '').trim();
+    const fullNarrative = String(P.narration || (rawSub ? `${rawText}. ${rawSub}` : rawText) || '').trim();
+    if (!fullNarrative && !rawSub) return;
+
+    // Se houver subtexto secundário, este é o corpo principal de narração
+    const scriptToPresent = rawSub || fullNarrative;
+    const words = scriptToPresent.toUpperCase().split(/\s+/).filter(Boolean);
+    if (!words.length) return;
+
+    // Tempo de início da narração do corpo (se houver título falado antes, dá o compasso inicial)
+    const headWords = rawText ? rawText.split(/\s+/).filter(Boolean).length : 0;
+    const totalWords = Math.max(1, headWords + words.length);
+    const sceneDur = Math.max(1.8, (P.dur || 4) - 0.4);
+    const subStartTime = rawText && rawSub ? (headWords / totalWords) * sceneDur * 0.88 : 0.1;
+    const subDuration = Math.max(1.2, sceneDur - subStartTime);
+
+    // Fade geral de entrada da apresentação de motion
+    const entryAlpha = MotionLib.ease.outCubic(MotionLib.clamp(ts / 0.35));
+    if (entryAlpha <= 0) return;
+
+    ctx.save();
+
+    // Agrupamento do roteiro em BEATS RÍTMICOS DE APRESENTAÇÃO (3 a 5 palavras por impacto visual)
+    const BEAT_SIZE = 4;
+    const beats: string[][] = [];
+    for (let i = 0; i < words.length; i += BEAT_SIZE) {
+      beats.push(words.slice(i, i + BEAT_SIZE));
+    }
+    const numBeats = Math.max(1, beats.length);
+
+    // Cálculo do beat ativo no exato momento da fala da voz
+    const bodyElapsed = Math.max(0, ts - subStartTime);
+    const beatTime = subDuration / numBeats;
+    const currentBeatIdx = Math.min(
+      numBeats - 1,
+      Math.max(0, Math.floor((bodyElapsed / subDuration) * numBeats))
+    );
+    const beatElapsed = Math.max(0, bodyElapsed - currentBeatIdx * beatTime);
+    const beatRatio = MotionLib.clamp(beatElapsed / Math.max(0.1, beatTime));
+
+    const currentBeat = beats[currentBeatIdx] || words;
+    const activeWordInBeat = Math.min(
+      currentBeat.length - 1,
+      Math.max(0, Math.floor(beatRatio * currentBeat.length))
+    );
+    const wordElapsedInBeat = beatElapsed - activeWordInBeat * (beatTime / currentBeat.length);
+    const wordRatio = MotionLib.clamp(wordElapsedInBeat / (beatTime / currentBeat.length));
+
+    // Posição central da faixa de Apresentação Motion (sem caixinha de legenda!)
+    const cy = H * 0.79;
+    const cx = W / 2;
+
+    // 1. Tag de Telemetria e Apresentação Motion no Topo do Bloco
+    const tagY = cy - 44;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+
+    // Barras animadas de equalizador de voz ao lado do badge
+    const eqBars = 4;
+    const eqW = 3;
+    const eqSpacing = 4;
+    const eqTotalW = eqBars * eqW + (eqBars - 1) * eqSpacing;
+    const eqStartX = cx - W * 0.28;
+    for (let b = 0; b < eqBars; b++) {
+      const barH = 5 + Math.abs(Math.sin(ts * 14 + b * 1.5)) * 12 + P.pulse * 6;
+      ctx.fillStyle = MotionLib.col(P.pal.acc, 0.85);
+      MotionLib.rrect(ctx, eqStartX + b * (eqW + eqSpacing), tagY - barH / 2, eqW, barH, 1.5);
+      ctx.fill();
+    }
+
+    MotionLib.text(
+      ctx,
+      '✦ APRESENTAÇÃO DO ROTEIRO · SINCRONIZADO',
+      cx,
+      tagY,
+      11,
+      {
+        color: P.pal.acc2,
+        weight: 800,
+        spacing: 2,
+        glow: P.pal.acc,
+        shadow: false,
+      }
+    );
+
+    // 2. Renderização do Beat Anterior (Efeito Esteira Vertical Flutuante - saindo suavemente)
+    if (currentBeatIdx > 0) {
+      const prevBeat = beats[currentBeatIdx - 1];
+      const prevText = prevBeat.join(' ');
+      const prevSz = Math.min(W * 0.046, 22);
+      const prevY = cy - prevSz * 1.55 - (1 - beatRatio) * 6;
+      MotionLib.text(ctx, prevText, cx, prevY, prevSz, {
+        color: P.pal.dim,
+        alpha: 0.22 * entryAlpha * (1 - beatRatio * 0.5),
+        weight: 700,
+        shadow: false,
+      });
+    }
+
+    // 3. Renderização do BEAT ATIVO (Grande, vibrante, com animação cinética palavra por palavra)
+    // Transição suave de entrada/saída entre beats
+    const beatEnterOffset = (1 - MotionLib.ease.outExpo(Math.min(1, beatElapsed / 0.22))) * 16;
+    const beatExitOffset = beatRatio > 0.88 ? -14 * MotionLib.ease.inOutCubic((beatRatio - 0.88) / 0.12) : 0;
+    const activeY = cy + beatEnterOffset + beatExitOffset;
+
+    // Medição e dimensionamento da linha ativa
+    const beatLineText = currentBeat.join(' ');
+    const activeSz = MotionLib.fit(ctx, beatLineText, W * 0.88, Math.min(W * 0.065, 34), 900);
+    ctx.font = `900 ${Math.round(activeSz)}px system-ui, -apple-system, 'SF Pro Display', Roboto, 'Segoe UI', sans-serif`;
+    const spaceW = ctx.measureText(' ').width * 1.25;
+
+    // Larguras individuais de cada palavra
+    const wordWidths = currentBeat.map((w) => ctx.measureText(w).width);
+    const totalBeatW =
+      wordWidths.reduce((sum, w) => sum + w, 0) + Math.max(0, currentBeat.length - 1) * spaceW;
+
+    let curWordX = cx - totalBeatW / 2;
+
+    // Palavras-chave que ganham destaque de Motion Graphics (capsule neon)
+    const POWER_KEYWORDS = [
+      'SISTEMA',
+      'CÓDIGO',
+      'CODIGO',
+      'IA',
+      'SAAS',
+      'APLICATIVO',
+      'APP',
+      'EQUIPE',
+      'LUCRO',
+      'VENDAS',
+      'DEPLOY',
+      'RECORDE',
+      'CLIENTE',
+      'CLIENTES',
+      'ELITE',
+      'PROJETO',
+      'ESCALAR',
+      'ONLINE',
+      'AUTÔNOMO',
+      'AUTONOMO',
+    ];
+
+    currentBeat.forEach((word, wi) => {
+      const isCurrent = wi === activeWordInBeat;
+      const isSpoken = wi <= activeWordInBeat;
+      const ww = wordWidths[wi];
+      const wordCenter = curWordX + ww / 2;
+
+      // Elastic punch quando a voz atinge a palavra no exato instante
+      const popProgress = isCurrent ? MotionLib.ease.outBack(MotionLib.clamp(wordRatio / 0.25)) : 1;
+      const wordScale = isCurrent ? 1.0 + 0.18 * (1 - popProgress) + P.pulse * 0.04 : 1.0;
+      const isPower = POWER_KEYWORDS.some((kw) => word.includes(kw));
+
+      // Destaque em Capsule Neon para Palavras de Impacto Narrativo
+      if (isPower && (isSpoken || isCurrent)) {
+        const capPadX = 10;
+        const capPadY = 6;
+        const capW = (ww + capPadX * 2) * wordScale;
+        const capH = (activeSz + capPadY * 2) * wordScale;
+        ctx.fillStyle = MotionLib.col(P.pal.acc, isCurrent ? 0.28 : 0.12);
+        MotionLib.rrect(ctx, wordCenter - capW / 2, activeY - capH / 2, capW, capH, 9);
+        ctx.fill();
+        ctx.strokeStyle = MotionLib.col(P.pal.acc, isCurrent ? 0.9 : 0.35);
+        ctx.lineWidth = isCurrent ? 2 : 1.2;
+        ctx.stroke();
+      }
+
+      // Palavra sendo ativamente pronunciada pela voz: Cor Neon + Glow + Linha de Pulso
+      if (isCurrent) {
+        // Linha de acento de fala pulsando sob a palavra ativa
+        const lineW = ww * wordScale * 1.05;
+        ctx.fillStyle = P.pal.acc;
+        MotionLib.rrect(ctx, wordCenter - lineW / 2, activeY + activeSz * 0.62, lineW, 3.5, 2);
+        ctx.fill();
+
+        MotionLib.text(ctx, word, wordCenter, activeY, activeSz * wordScale, {
+          color: P.pal.acc,
+          weight: 900,
+          glow: P.pal.acc,
+          alpha: 1.0,
+          shadow: true,
+        });
+      } else if (isSpoken) {
+        // Palavra já dita na cena: Branca, nítida, de alto contraste
+        MotionLib.text(ctx, word, wordCenter, activeY, activeSz, {
+          color: P.pal.fg,
+          weight: 800,
+          alpha: 0.92 * entryAlpha,
+          shadow: true,
+        });
+      } else {
+        // Palavra que ainda será dita no beat: Translúcida, antecipando o ritmo da fala
+        MotionLib.text(ctx, word, wordCenter, activeY, activeSz * 0.96, {
+          color: P.pal.dim,
+          weight: 700,
+          alpha: 0.28 * entryAlpha,
+          shadow: false,
+        });
+      }
+
+      curWordX += ww + spaceW;
+    });
+
+    // 4. Renderização do Próximo Beat (Efeito Esteira Vertical Flutuante - aguardando entrada)
+    if (currentBeatIdx < numBeats - 1) {
+      const nextBeat = beats[currentBeatIdx + 1];
+      const nextText = nextBeat.join(' ');
+      const nextSz = Math.min(W * 0.046, 22);
+      const nextY = cy + nextSz * 1.55 + (1 - beatRatio) * 6;
+      MotionLib.text(ctx, nextText, cx, nextY, nextSz, {
+        color: P.pal.dim,
+        alpha: (0.16 + beatRatio * 0.16) * entryAlpha,
+        weight: 700,
+        shadow: false,
+      });
+    }
 
     ctx.restore();
   },
@@ -738,145 +1554,22 @@ export function synthesizeConnectedSceneCode(
   idx: number,
   total: number
 ): string {
-  const archetypes = [
-    // 0: Eclipse / Horizonte Radial Assimétrico
-    `const R=M.rng(P.seed),e=M.ease.outExpo(M.p(ts,0,.8));
-const sunX=W*(.28+R()*.44),sunY=H*(.28+R()*.18),sunR=W*(.16+.1*e)*(1+P.pulse*.07);
-const g=ctx.createRadialGradient(sunX,sunY,sunR*.1,sunX,sunY,W*.9);
-g.addColorStop(0,M.col(P.pal.acc2,.9));g.addColorStop(.4,M.col(P.pal.acc,.38));g.addColorStop(1,'rgba(0,0,0,0)');
-ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
-for(let k=0;k<16;k++){
-  const a=k/16*Math.PI*2+ts*.35;
-  ctx.strokeStyle=M.col(k%2?P.pal.acc:P.pal.acc2,.28);ctx.lineWidth=2+(k%3)*2;
-  ctx.beginPath();ctx.moveTo(sunX+Math.cos(a)*sunR,sunY+Math.sin(a)*sunR);
-  ctx.lineTo(sunX+Math.cos(a)*W*.85*e,sunY+Math.sin(a)*W*.85*e);ctx.stroke();
-}
-ctx.fillStyle=P.pal.acc2;ctx.beginPath();ctx.arc(sunX,sunY,sunR,0,Math.PI*2);ctx.fill();
-const L=M.lines(P.text,11),fs=M.fit(ctx,L[0]||P.text,W*.84,W*.15);
-L.forEach((l,i)=>{
-  const st=M.ease.outBack(M.stagger(ts,i,.06,.1,.48));
-  M.text(ctx,l,W*.08,H*.60+i*fs*1.12,fs,{align:'left',color:i===L.length-1?P.pal.acc2:P.pal.fg,alpha:st,glow:P.pal.acc});
-});
-M.sub(ctx,W,H,P,ts);`,
-
-    // 1: Correntes Fluídas & Fitas Cinéticas
-    `const R=M.rng(P.seed),e=M.ease.outCubic(M.p(ts,0,.75));
-for(let b=0;b<9;b++){
-  const y0=H*(.16+b*.085);
-  ctx.strokeStyle=M.col(b%2?P.pal.acc:P.pal.acc2,.35+.06*b);
-  ctx.lineWidth=2.5+b*1.1;
-  M.wave(ctx,W,H,y0,(18+b*4)*e*(1+P.pulse*.3),1.4+b*.2,ts*3.2+b*.8,false);
-  ctx.stroke();
-  const px=(ts*(180+b*30)+b*95)%W;
-  const py=y0+Math.sin((px/W)*Math.PI*2*(1.4+b*.2)+ts*3.2+b*.8)*(18+b*4)*e;
-  ctx.fillStyle=P.pal.fg;ctx.beginPath();ctx.arc(px,py,5+P.pulse*4,0,7);ctx.fill();
-}
-const L=M.lines(P.text,11),fs=M.fit(ctx,L[0]||P.text,W*.84,W*.155);
-L.forEach((l,i)=>{
-  const st=M.ease.outExpo(M.stagger(ts,i,.05,.09,.45));
-  M.text(ctx,l,W*.91,H*.28+i*fs*1.14,fs,{align:'right',color:i===0?P.pal.fg:P.pal.acc2,alpha:st,glow:P.pal.acc});
-});
-M.sub(ctx,W,H,P,ts);`,
-
-    // 2: Arquitetura Vertical & Painéis Vivos
-    `const R=M.rng(P.seed),cols=9,cw=W/cols;
-for(let c=0;c<cols;c++){
-  const st=M.ease.outExpo(M.stagger(ts,c,0,.04,.6));
-  const h=H*(.28+R()*.52)*st*(1+P.pulse*.05);
-  const fromTop=c%2===0;
-  const x=c*cw+4,y=fromTop?0:H-h,w=cw-8;
-  ctx.fillStyle=M.col(c%3===0?P.pal.acc:P.pal.bg2,.55);
-  M.rrect(ctx,x,y,w,h,12);ctx.fill();
-  ctx.strokeStyle=M.col(P.pal.acc2,.7);ctx.lineWidth=2;ctx.stroke();
-}
-ctx.save();ctx.translate(W*.5,H*.46);ctx.rotate((R()-.5)*.14);
-const fs=M.fit(ctx,P.text,W*.84,W*.15);
-ctx.fillStyle=M.col(P.pal.bg1,.88);M.rrect(ctx,-W*.45,-fs*.95,W*.9,fs*1.9,18);ctx.fill();
-ctx.strokeStyle=P.pal.acc;ctx.lineWidth=3;ctx.stroke();
-M.text(ctx,P.text,0,0,fs,{color:P.pal.fg,glow:P.pal.acc});
-ctx.restore();
-M.sub(ctx,W,H,P,ts);`,
-
-    // 3: Escultura 3D & Órbita Perspectiva
-    `const R=M.rng(P.seed),cx=W*.5,cy=H*.38,e=M.ease.outBack(M.p(ts,0,.65));
-const pts=[];
-for(let i=0;i<32;i++){
-  const phi=Math.acos(1-2*(i+.5)/32),th=Math.PI*(1+Math.sqrt(5))*i+ts*1.3;
-  const rad=W*.28*e*(1+P.pulse*.08);
-  const p3=M.rot3([rad*Math.sin(phi)*Math.cos(th),rad*Math.sin(phi)*Math.sin(th),rad*Math.cos(phi)],ts*.8,ts*1.1,ts*.4);
-  pts.push(M.proj(p3,W,H,820,cx,cy));
-}
-ctx.lineWidth=2;
-for(let i=0;i<pts.length;i++){
-  const nxt=pts[(i+3)%pts.length];
-  ctx.strokeStyle=M.col(i%2?P.pal.acc:P.pal.acc2,.55);
-  ctx.beginPath();ctx.moveTo(pts[i].x,pts[i].y);ctx.lineTo(nxt.x,nxt.y);ctx.stroke();
-  ctx.fillStyle=P.pal.fg;ctx.beginPath();ctx.arc(pts[i].x,pts[i].y,4.5*pts[i].s,0,7);ctx.fill();
-}
-const L=M.lines(P.text,11),fs=M.fit(ctx,L[0]||P.text,W*.86,W*.14);
-L.forEach((l,i)=>{
-  const st=M.ease.outExpo(M.stagger(ts,i,.1,.09,.45));
-  M.text(ctx,l,cx,H*.64+i*fs*1.1,fs*st,{color:i===L.length-1?P.pal.acc:P.pal.fg,glow:P.pal.acc});
-});
-M.sub(ctx,W,H,P,ts);`,
-
-    // 4: Diagonais Brutalistas & Recorte Tipográfico
-    `const R=M.rng(P.seed),e=M.ease.outExpo(M.p(ts,0,.7));
-ctx.save();ctx.translate(W*.5,H*.44);ctx.rotate(-.18);
-for(let k=-4;k<=4;k++){
-  const shift=((ts*220*(k%2?1:-1))+k*80)%(W*.6);
-  ctx.fillStyle=M.col(k%2?P.pal.acc:P.pal.acc2,k===0?.85:.22);
-  ctx.fillRect(-W*.8+shift,k*H*.085,W*1.6*e,H*.055);
-}
-ctx.restore();
-const L=M.lines(P.text,10),fs=M.fit(ctx,L[0]||P.text,W*.86,W*.16);
-L.forEach((l,i)=>{
-  const st=M.ease.outBack(M.stagger(ts,i,.04,.1,.48));
-  const outline=i===0&&L.length>1;
-  M.text(ctx,l,W*.5+(1-st)*(i%2?120:-120),H*.36+i*fs*1.15,fs*(1+P.pulse*.06),{
-    color:outline?'rgba(0,0,0,0)':P.pal.fg,
-    stroke:outline?P.pal.acc2:P.pal.bg1,
-    strokeW:outline?4:8,
-    glow:P.pal.acc
+  return `M.semanticMotion(ctx, W, H, P, ts);
+const L = M.lines(P.text, 12);
+const fs = M.fit(ctx, L[0] || P.text, W * 0.84, W * 0.125);
+L.forEach((l, i) => {
+  const st = M.ease.outBack(M.stagger(ts, i, 0.04, 0.08, 0.45));
+  M.text(ctx, l, W * 0.5, H * 0.14 + i * fs * 1.12, fs * st * (1 + P.pulse * 0.04), {
+    color: i === L.length - 1 ? P.pal.acc : P.pal.fg,
+    glow: P.pal.acc2
   });
 });
-M.sub(ctx,W,H,P,ts);`,
-
-    // 5: Portal de Profundidade Z & Geometria Poligonal
-    `const R=M.rng(P.seed),cx=W*.5,cy=H*.44,sides=3+((P.seed+P.i)%5);
-for(let k=0;k<13;k++){
-  const z=((k/13)+ts*.48)%1,rad=Math.pow(z,2)*W*.95;
-  ctx.strokeStyle=M.col(k%2?P.pal.acc:P.pal.acc2,z*.95);
-  ctx.lineWidth=2+z*7*(1+P.pulse*.3);
-  M.poly(ctx,cx,cy,rad,sides,z*1.4+ts*(k%2?.5:-.5));
-  ctx.stroke();
-}
-M.mainText(ctx,W,H,P,ts,{scale:.78+.22*M.ease.outBack(M.p(ts,.06,.5)),alpha:M.p(ts,0,.3)});
-M.sub(ctx,W,H,P,ts);`,
-  ];
-
-  if (scene.role === 'closing' || idx === total - 1) {
-    return `const cx=W/2,cy=H*.42,e=M.ease.outExpo(M.p(ts,0,.85));
-const g=ctx.createRadialGradient(cx,cy,10,cx,cy,W*.48*e);
-g.addColorStop(0,M.col(P.pal.acc,.42));g.addColorStop(1,'rgba(0,0,0,0)');
-ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
-for(let r=0;r<3;r++){
-  ctx.strokeStyle=M.col(r%2?P.pal.acc2:P.pal.acc,.85-r*.25);
-  ctx.lineWidth=4-r;
-  ctx.beginPath();ctx.arc(cx,cy,W*(.22+r*.07)*e*(1+P.pulse*.04),ts*(r%2?-0.8:0.8),ts*(r%2?-0.8:0.8)+Math.PI*(1.6-r*.2));ctx.stroke();
-}
-const fs=M.fit(ctx,P.text,W*.84,W*.15);
-M.text(ctx,P.text,cx,cy,fs*e,{color:P.pal.fg,glow:P.pal.acc,spacing:4});
-const bw=W*.38*M.ease.outExpo(M.p(ts,.25,.55));
-ctx.fillStyle=P.pal.acc2;ctx.fillRect(cx-bw/2,cy+fs*.85,bw,4);
-M.sub(ctx,W,H,P,ts);`;
-  }
-
-  return archetypes[(idx + (scene.seed || 0)) % archetypes.length];
+M.sub(ctx, W, H, P, ts);`;
 }
 
 export const FallbackEngines: Record<FallbackKind, SceneDrawFn> = {
   kinetic: (ctx, _t, ts, W, H, P, M) => {
+    M.semanticMotion(ctx, W, H, P, ts);
     M.deco(ctx, W, H, P, ts);
     const R = M.rng(P.seed);
     const dir = R() < 0.5 ? -1 : 1;
@@ -908,6 +1601,7 @@ export const FallbackEngines: Record<FallbackKind, SceneDrawFn> = {
     ctx.fillRect(W / 2 - bw / 2, y, bw, Math.max(4, W * 0.009));
   },
   burst: (ctx, _t, ts, W, H, P, M) => {
+    M.semanticMotion(ctx, W, H, P, ts);
     const R = M.rng(P.seed);
     const cx = W * (0.35 + R() * 0.3);
     const cy = H * (0.35 + R() * 0.22);
@@ -934,6 +1628,7 @@ export const FallbackEngines: Record<FallbackKind, SceneDrawFn> = {
     });
   },
   tunnel: (ctx, _t, ts, W, H, P, M) => {
+    M.semanticMotion(ctx, W, H, P, ts);
     const R = M.rng(P.seed);
     const cx = W / 2;
     const cy = H * 0.46;
@@ -954,6 +1649,7 @@ export const FallbackEngines: Record<FallbackKind, SceneDrawFn> = {
     });
   },
   grid: (ctx, _t, ts, W, H, P, M) => {
+    M.semanticMotion(ctx, W, H, P, ts);
     const R = M.rng(P.seed);
     const cols = [5, 6, 8][Math.floor(R() * 3)];
     const cs = W / cols;
@@ -981,6 +1677,7 @@ export const FallbackEngines: Record<FallbackKind, SceneDrawFn> = {
     }
   },
   orbit: (ctx, _t, ts, W, H, P, M) => {
+    M.semanticMotion(ctx, W, H, P, ts);
     const R = M.rng(P.seed);
     const cx = W / 2;
     const cy = H * 0.46;
@@ -1010,6 +1707,7 @@ export const FallbackEngines: Record<FallbackKind, SceneDrawFn> = {
     });
   },
   cube: (ctx, _t, ts, W, H, P, M) => {
+    M.semanticMotion(ctx, W, H, P, ts);
     const R = M.rng(P.seed);
     const cx = W / 2;
     const cy = H * 0.38;
@@ -1059,6 +1757,7 @@ export const FallbackEngines: Record<FallbackKind, SceneDrawFn> = {
     M.mainText(ctx, W, H, P, ts, { cy: H * 0.68, scale: 0.75, alpha: M.p(ts, 0.15, 0.4) });
   },
   closing: (ctx, _t, ts, W, H, P, M) => {
+    M.semanticMotion(ctx, W, H, P, ts);
     const cx = W / 2;
     const cy = H * 0.46;
     const r = W * 0.34 * M.ease.outExpo(M.p(ts, 0, 1));

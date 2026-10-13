@@ -44,7 +44,16 @@ const M_API = `M (biblioteca utilitária já injetada, NÃO redefina):
  - Cores: M.col(hex,alpha)->'rgba()' | M.mixc(hex1,hex2,t)->'rgb()'
  - Formas & Ondas: M.poly(ctx,cx,cy,r,lados,rot) | M.star(ctx,cx,cy,rOut,rIn,pontas,rot) | M.rrect(ctx,x,y,w,h,raio) | M.wave(ctx,W,H,yBase,amp,freq,fase,fillBottom) | M.ring(ctx,cx,cy,r,a0,a1)
  - Projeção 3D: M.rot3([x,y,z],ax,ay,az)->[x,y,z] | M.proj([x,y,z],W,H,fov,cx,cy)->{x,y,s}
- - Tipografia: M.text(ctx,str,x,y,size,{color,alpha,weight,align,rot,glow,stroke,strokeW,spacing,shadow}) | M.fit(ctx,str,maxW,size)->size | M.lines(str,maxChars)->array de linhas | M.mainText(ctx,W,H,P,ts,{scale,alpha,cx,cy,align,rot,layout})`;
+ - Tipografia & Motion do Roteiro: M.text(ctx,str,x,y,size,{color,alpha,weight,align,rot,glow,stroke,strokeW,spacing,shadow}) | M.fit(ctx,str,maxW,size)->size | M.lines(str,maxChars)->array de linhas | M.mainText(ctx,W,H,P,ts,{scale,alpha,cx,cy,align,rot,layout}) | M.sub(ctx,W,H,P,ts) ou M.narrativePresentation(ctx,W,H,P,ts) -> APRESENTAÇÃO MOTION TIPOGRÁFICA DO ROTEIRO: SEM CAIXINHA DE LEGENDA! Mostra o roteiro como apresentação dinâmica e cinematográfica, com palavras sincronizadas com a voz, esteira vertical e badges neon de impacto!
+ - MOTIONS TEMÁTICOS CONECTADOS AO ROTEIRO:
+   * M.renderCodeSystem(ctx,W,H,P,ts) -> Janela de código IDE digitando em tempo real, terminal e arquitetura de sistema conectado
+   * M.renderGrowthFinance(ctx,W,H,P,ts) -> Dashboard financeiro com métricas em ascensão, gráfico exponencial e receita
+   * M.renderAIAgents(ctx,W,H,P,ts) -> Rede neural multicamadas viva com impulsos de dados sinápticos e núcleo holográfico
+   * M.renderSpeedLaunch(ctx,W,H,P,ts) -> Linhas de dobra espacial (warp), tacômetro dinâmico e cronômetro em tempo recorde
+   * M.renderSecurityTrust(ctx,W,H,P,ts) -> Escudo holográfico hexagonal com escaneamento a laser e selo auditado
+   * M.renderClientsConversion(ctx,W,H,P,ts) -> Funil de conversão dinâmico, fluxo de leads e notificações de novos clientes
+   * M.renderMobileApp(ctx,W,H,P,ts) -> Smartphone premium em perspectiva com cards de UI animados
+   * M.semanticMotion(ctx,W,H,P,ts) -> DETECTOR SEMÂNTICO AUTOMÁTICO: lê o roteiro da cena e renderiza o motion equivalente em tempo real!`;
 
 const PROIBIDO = [
   'fetch(',
@@ -944,11 +953,11 @@ Responda APENAS com JSON válido neste formato exato:
 
   const n = rawScenes.length;
   // Calcula o tempo necessário para fala de cada cena com folga para respiração
-  // Média de fala em português: ~2.4 palavras por segundo + 0.65s de respiro final
+  // Média de fala em português: ~2.0 palavras por segundo + 0.85s de respiro final
   const speechDurations = rawScenes.map((s) => {
     const fullText = s.narration || `${s.text}. ${s.sub || ''}`;
     const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
-    const estimatedSpeechSec = Math.max(2.4, (wordCount / 2.3) + 0.7);
+    const estimatedSpeechSec = Math.max(3.2, (wordCount / 2.0) + 0.85);
     return estimatedSpeechSec;
   });
 
@@ -969,9 +978,9 @@ Responda APENAS com JSON válido neste formato exato:
   const durs = rawScenes.map((_s, i) => {
     const proportionalDur = (duration * ws[i]) / sumW;
     const requiredSpeechDur = speechDurations[i];
-    // Garante que a cena tenha pelo menos o tempo da fala + 0.4s de margem visual
+    // Garante que a cena tenha pelo menos o tempo da fala + 0.5s de margem visual
     const finalDur = Math.max(requiredSpeechDur, proportionalDur);
-    return Math.round(finalDur * 1000) / 1000;
+    return Math.round(finalDur * 10) / 10;
   });
 
   const biblioteca = lerLocal<Array<{ role: string; code: string }>>('biblioteca_cenas', []);
@@ -1026,13 +1035,15 @@ Responda APENAS com JSON válido neste formato exato:
   });
   gravarLocal('historico_planos_runs', runs.slice(-30));
 
+  const totalReelDur = Math.max(duration, Math.round(acc * 10) / 10);
+
   return {
     showreel: {
       title,
       prompt,
       W: width,
       H: height,
-      duration,
+      duration: totalReelDur,
       dna,
       scenes,
     },
@@ -1125,14 +1136,21 @@ PARÂMETROS DISPONÍVEIS NO ESCOPO (NÃO escreva function(...) { ... }, escreva 
   Cores Hex do Projeto: bg1=${pal.bg1} bg2=${pal.bg2} acc=${pal.acc} acc2=${pal.acc2} fg=${pal.fg} dim=${pal.dim}
 - ${M_API}
 
-REGRAS DE OURO PARA NÃO PARECER UM TEMPLATE PADRÃO + OBSERVAÇÃO DE VOZ NA TELA:
-1. OBSERVAÇÃO OBRIGATÓRIA DE VOZ & ESCRITA NA TELA: Há uma voz narrando tudo que passa na tela! PRATICAMENTE QUASE TUDO QUE FOR FALADO NA VOZ TEM QUE APARECER DE ESCRITA NA TELA!
-   - Desenhe P.text com máximo impacto e legibilidade na metade superior/central da composição;
-   - Chame obrigatoriamente M.sub(ctx, W, H, P, ts) no final da função (ou desenhe todas as palavras de P.sub quebradas em linhas com M.lines(P.sub, 24)) para que 100% do que o narrador fala apareça escrito e sincronizado na tela!
-2. PROIBIDO USAR LAYOUT PADRÃO: Não faça apenas um círculo de bolinhas no meio com texto centralizado! Crie uma composição visual que represente de verdade a ideia "${scene.idea}" e a arquitetura "${scene.layout_mode}".
-3. CENÁRIO + ELEMENTOS CONECTADOS AO TEMA: Pinte sua própria atmosfera/cenário em camadas (usando gradientes criativos, M.wave, M.poly, M.rrect, M.rot3/M.proj, M.noise, feixes de luz, silhuetas, partículas temáticas ou geometria viva).
-4. CONTINUIDADE (VISUAL BRIDGE): Nos primeiros 25% da cena (t < 0.25), faça os elementos nascerem continuando a "CONEXÃO RECEBIDA DA CENA ANTERIOR". Nos últimos 20% (t > 0.80), conduza o movimento na direção da "CONEXÃO DE SAÍDA PARA A PRÓXIMA CENA".
-5. FUNÇÃO PURA E SEGURA: Sem variáveis globais, sem Math.random() (use const R = M.rng(P.seed)), sem imagens externas/DOM, sempre feche ctx.save() com ctx.restore().
+REGRAS DE OURO PARA NÃO PARECER UM TEMPLATE PADRÃO + EQUIVALÊNCIA NARRATIVA:
+1. ROTEIRO COMO APRESENTAÇÃO & MOTION (NÃO USE CAIXINHA DE LEGENDA): O que o roteiro fala NÃO deve aparecer como uma caixinha de legenda no rodapé! Deve aparecer como MOTION DESIGN e APRESENTAÇÃO TIPOGRÁFICA CINÉTICA sincronizada com a voz!
+   - Desenhe P.text com grande impacto e estilo visual autoral;
+   - Chame M.sub(ctx, W, H, P, ts) (ou M.narrativePresentation) para que o roteiro falado se transforme em esteira cinética com palavras acendendo em neon no ritmo exato da fala do narrador!
+2. EQUIVALÊNCIA TOTAL ENTRE NARRATIVA E MOTION: Tudo o que estiver sendo falado no roteiro desta cena TEM QUE TER MOTION EQUIVALENTE NA TELA NO EXATO MOMENTO DA FALA!
+   - Se a fala menciona criar um sistema, software, código ou programar: mostre uma janela de código IDE digitando e gerando o sistema em tempo real, terminal e arquitetura (use M.renderCodeSystem(ctx, W, H, P, ts) ou renderize sua própria IDE detalhada);
+   - Se menciona vendas, faturamento, dinheiro, receita, escala ou lucro: mostre gráfico de crescimento exponencial subindo e métricas financeiras (use M.renderGrowthFinance(ctx, W, H, P, ts));
+   - Se menciona IA, inteligência artificial, agentes, rede neural ou automação: mostre rede neural multicamadas pulsando e núcleo holográfico de IA (use M.renderAIAgents(ctx, W, H, P, ts));
+   - Se menciona velocidade, tempo recorde, lançar ou deploy rápido: mostre tacômetro e linhas de dobra espacial (use M.renderSpeedLaunch(ctx, W, H, P, ts));
+   - Se menciona clientes, leads, conversão ou público: mostre funil de conversão e notificações (use M.renderClientsConversion(ctx, W, H, P, ts));
+   - Você pode e deve chamar M.semanticMotion(ctx, W, H, P, ts) ou os métodos específicos de M para ilustrar o roteiro perfeitamente!
+3. PROIBIDO USAR LAYOUT PADRÃO: Não faça apenas um círculo genérico com texto no meio! Crie uma composição visual rica e moderna que represente a ideia "${scene.idea}" e a arquitetura "${scene.layout_mode}".
+4. CENÁRIO + ELEMENTOS CONECTADOS AO TEMA: Pinte sua própria atmosfera/cenário em camadas (usando gradientes criativos, M.wave, M.poly, M.rrect, M.rot3/M.proj, M.noise, feixes de luz, silhuetas, partículas temáticas ou geometria viva).
+5. CONTINUIDADE (VISUAL BRIDGE): Nos primeiros 25% da cena (t < 0.25), faça os elementos nascerem continuando a "CONEXÃO RECEBIDA DA CENA ANTERIOR". Nos últimos 20% (t > 0.80), conduza o movimento na direção da "CONEXÃO DE SAÍDA PARA A PRÓXIMA CENA".
+6. FUNÇÃO PURA E SEGURA: Sem variáveis globais, sem Math.random() (use const R = M.rng(P.seed)), sem imagens externas/DOM, sempre feche ctx.save() com ctx.restore().
 
 Escreva SOMENTE o código JavaScript puro do corpo da função (sem blocos markdown, sem explicações):`;
 
@@ -1382,57 +1400,60 @@ export async function sintetizarVozCenaLocal(params: {
   }
 
   const n = chaves.length;
-  for (let attempt = 0; attempt < n; attempt++) {
-    const keyIdx = (idx + attempt) % n;
-    const url =
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent';
-    try {
-      const resp = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': chaves[keyIdx],
-        },
-        body: JSON.stringify({
-          contents: [
-            {
-              parts: [
-                {
-                  text: `Narre em português do Brasil com tom dinâmico, envolvente e dicção clara: ${cleanText}`,
-                },
-              ],
-            },
-          ],
-          generationConfig: {
-            responseModalities: ['AUDIO'],
-            speechConfig: {
-              voiceConfig: {
-                prebuiltVoiceConfig: {
-                  voiceName,
+  const ttsModels = ['gemini-3.8-flash-lite-tts', 'gemini-3.8-flash-tts'];
+
+  for (const model of ttsModels) {
+    for (let attempt = 0; attempt < n; attempt++) {
+      const keyIdx = (idx + attempt) % n;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
+      try {
+        const resp = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': chaves[keyIdx],
+          },
+          body: JSON.stringify({
+            contents: [
+              {
+                parts: [
+                  {
+                    text: `Atue como locutor humano profissional de showreel premium. Narre em português do Brasil com dicção perfeita, tom natural, caloroso, confiante e humanizado, com ritmo orgânico de respiração: "${cleanText}"`,
+                  },
+                ],
+              },
+            ],
+            generationConfig: {
+              responseModalities: ['AUDIO'],
+              speechConfig: {
+                voiceConfig: {
+                  prebuiltVoiceConfig: {
+                    voiceName,
+                  },
                 },
               },
             },
-          },
-        }),
-      });
+          }),
+        });
 
-      if (resp.ok) {
-        const data = safeParseJson<{
-          candidates?: Array<{
-            content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
-          }>;
-        }>(await resp.text());
-        const inline = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
-        if (inline?.data) {
-          return {
-            audioBase64: String(inline.data),
-            mimeType: String(inline.mimeType || 'audio/L16;rate=24000'),
-            fallbackSpeech: false,
-          };
+        if (resp.ok) {
+          const data = safeParseJson<{
+            candidates?: Array<{
+              content?: { parts?: Array<{ inlineData?: { data?: string; mimeType?: string } }> };
+            }>;
+          }>(await resp.text());
+          const inline = data?.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+          if (inline?.data) {
+            return {
+              audioBase64: String(inline.data),
+              mimeType: String(inline.mimeType || 'audio/L16;rate=24000'),
+              fallbackSpeech: false,
+            };
+          }
         }
+      } catch {
+        // try next key or model
       }
-    } catch {
-      // try next key or fallback to Web Speech API
     }
   }
 
